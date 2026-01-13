@@ -30,14 +30,39 @@ input, textarea, select, button {
   margin: 8px;
 }
 
-#imagePreview img {
+#imagePreview {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.image-wrap {                    /* NEW */
+  position: relative;
+  display: inline-block;
+}
+
+.image-wrap img {
   width: 70px;
   height: 70px;
   object-fit: contain;
   margin: 5px;
   border-radius: 10px;
   box-shadow: 0 0 6px rgba(0,0,0,0.25);
+}
+
+.image-wrap button {             /* NEW */
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  border: none;
+  background: #ff4d4d;
+  color: white;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
   cursor: pointer;
+  font-size: 14px;
+  line-height: 18px;
 }
 
 /* ---------- GAME ---------- */
@@ -125,8 +150,11 @@ input, textarea, select, button {
 <div id="setup">
   <h2>Teacher setup</h2>
 
-  <input id="instruction" value="Move, read, speak!" style="width:420px"><br>
+  <input id="editLink" placeholder="Paste student link to edit" style="width:420px"><br>
+  <button onclick="loadFromLink()">📂 Load activity</button>
+  <hr style="width:60%; margin:20px auto">
 
+  <input id="instruction" value="Move, read, speak!" style="width:420px"><br>
   <textarea id="phrases" placeholder="One phrase per line"></textarea><br>
 
   <label>Bubble size:
@@ -140,15 +168,7 @@ input, textarea, select, button {
   <button onclick="addImage()">➕ Add image</button>
   <div id="imagePreview"></div><br>
 
-  <hr>
-
-  <h3>Edit existing activity</h3>
-  <input id="editId" placeholder="activity-001" style="width:200px">
-  <button onclick="loadActivity()">Load</button>
-
-  <hr>
-
-  <button onclick="saveActivity()">💾 Save activity</button>
+  <button onclick="saveLink()">💾 Save activity & get student link</button>
   <p id="linkBox"></p>
 </div>
 
@@ -170,12 +190,56 @@ const popSound = document.getElementById("popSound");
 let SIZE = 200, R = 100;
 let bubbles = [], smalls = [], images = [];
 let active = null, ox = 0, oy = 0;
-let currentActivityId = null;
+let savedPhrases = [];
 
 const gravity = 0.45;
 const drift = 0.12;
 
-/* ---------- IMAGE ---------- */
+/* ---------- IMAGE PREVIEW RENDER (NEW) ---------- */
+function renderImagePreview() {
+  imagePreview.innerHTML = "";
+  images.forEach((src, index) => {
+    const wrap = document.createElement("div");
+    wrap.className = "image-wrap";
+
+    const img = document.createElement("img");
+    img.src = src;
+
+    const del = document.createElement("button");
+    del.textContent = "×";
+    del.onclick = () => {
+      images.splice(index, 1);
+      renderImagePreview();
+    };
+
+    wrap.appendChild(img);
+    wrap.appendChild(del);
+    imagePreview.appendChild(wrap);
+  });
+}
+
+/* ---------- LOAD FROM LINK ---------- */
+function loadFromLink() {
+  try {
+    const url = new URL(editLink.value.trim());
+    const encoded = url.searchParams.get("play");
+    if (!encoded) return alert("Invalid student link");
+
+    const data = JSON.parse(
+      decodeURIComponent(escape(atob(encoded)))
+    );
+
+    instruction.value = data.instruction || "";
+    phrases.value = data.phrases || "";
+    bubbleSize.value = data.size || "200";
+    images = data.images || [];
+    renderImagePreview();
+  } catch {
+    alert("Invalid student link");
+  }
+}
+
+/* ---------- ADD IMAGE ---------- */
 function addImage() {
   const input = document.createElement("input");
   input.type = "file";
@@ -193,96 +257,51 @@ function addImage() {
   input.click();
 }
 
-function renderImagePreview() {
-  const box = document.getElementById("imagePreview");
-  box.innerHTML = "";
-  images.forEach((src, i) => {
-    const img = document.createElement("img");
-    img.src = src;
-    img.title = "Click to delete";
-    img.onclick = () => {
-      images.splice(i, 1);
-      renderImagePreview();
-    };
-    box.appendChild(img);
-  });
-}
-
-/* ---------- SAVE ---------- */
-function saveActivity() {
-  const id = currentActivityId || "activity-" + Date.now();
-  currentActivityId = id;
-
+/* ---------- SAVE LINK ---------- */
+function saveLink() {
   const data = {
     instruction: instruction.value,
     phrases: phrases.value,
     size: bubbleSize.value,
     images
   };
-
-  const blob = new Blob([JSON.stringify(data, null, 2)], {type:"application/json"});
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = id + ".json";
-  a.click();
-
-  const url = location.origin + location.pathname + "?play=" + id;
+  const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(data))));
+  const url = location.origin + location.pathname + "?play=" + encoded;
   linkBox.innerHTML =
-    "Upload the downloaded file to <b>activities/</b><br>Student link:<br>" +
-    "<a href='"+url+"' target='_blank'>"+url+"</a>";
-}
-
-/* ---------- LOAD ---------- */
-function loadActivity() {
-  const id = editId.value.trim();
-  if (!id) return alert("Enter activity id");
-
-  fetch("activities/" + id + ".json")
-    .then(r => r.json())
-    .then(data => {
-      currentActivityId = id;
-      instruction.value = data.instruction;
-      phrases.value = data.phrases;
-      bubbleSize.value = data.size;
-      images = data.images || [];
-      renderImagePreview();
-    })
-    .catch(() => alert("Activity not found"));
+    "Student link:<br><a href='" + url + "' target='_blank'>" + url + "</a>";
 }
 
 /* ---------- STUDENT MODE ---------- */
 const params = new URLSearchParams(location.search);
 if (params.has("play")) {
-  const id = params.get("play");
-  fetch("activities/" + id + ".json")
-    .then(r => r.json())
-    .then(data => {
-      document.getElementById("setup").style.display = "none";
-      document.getElementById("game").style.display = "block";
-      instructionText.textContent = data.instruction;
-      SIZE = +data.size;
-      R = SIZE / 2;
-      images = data.images || [];
+  setup.style.display = "none";
+  game.style.display = "block";
 
-      data.phrases.split("\n").map(t=>t.trim()).filter(Boolean)
-        .forEach(createTextBubble);
-      images.forEach(createImageBubble);
-    })
-    .catch(() => alert("Activity not found"));
+  const data = JSON.parse(
+    decodeURIComponent(escape(atob(params.get("play"))))
+  );
+
+  instructionText.textContent = data.instruction;
+  SIZE = +data.size;
+  R = SIZE / 2;
+  images = data.images || [];
+  savedPhrases = data.phrases.split("\n").map(t => t.trim()).filter(Boolean);
+
+  savedPhrases.forEach(createTextBubble);
+  images.forEach(createImageBubble);
 }
 
-/* ---------- GAME ---------- */
+/* ---------- RESTART ---------- */
 function restart() {
   container.innerHTML = "";
   bubbles = [];
   smalls = [];
-  document.getElementById("againBtn").style.display = "none";
-
-  phrases.value.split("\n").map(t=>t.trim()).filter(Boolean)
-    .forEach(createTextBubble);
+  againBtn.style.display = "none";
+  savedPhrases.forEach(createTextBubble);
   images.forEach(createImageBubble);
 }
 
+/* ---------- CREATE BUBBLES ---------- */
 function createTextBubble(text) {
   const b = createBaseBubble();
   const safe = document.createElement("div");
@@ -328,6 +347,7 @@ function createBaseBubble() {
   return b;
 }
 
+/* ---------- BURST ---------- */
 function burst(b) {
   popSound.currentTime = 0;
   popSound.play().catch(()=>{});
@@ -344,7 +364,7 @@ function burst(b) {
   container.removeChild(b);
   bubbles.splice(bubbles.indexOf(b), 1);
   if (!bubbles.length)
-    document.getElementById("againBtn").style.display = "inline-block";
+    againBtn.style.display = "inline-block";
 }
 
 /* ---------- DRAG ---------- */
@@ -353,30 +373,58 @@ document.onmousemove = e => {
   active.x = Math.max(0, Math.min(container.clientWidth - SIZE, e.pageX - ox));
   active.y = Math.max(0, Math.min(container.clientHeight - SIZE, e.pageY - oy - container.offsetTop));
 };
-document.onmouseup = () => active = null;
 
-/* ---------- ANIMATE ---------- */
+document.onmouseup = () => {
+  if (active) {
+    active.vx = (Math.random() - 0.5) * drift;
+    active.vy = gravity;
+  }
+  active = null;
+};
+
+/* ---------- COLLISION + ANIMATION ---------- */
+function resolveCollisions() {
+  for (let i = 0; i < bubbles.length; i++)
+    for (let j = i + 1; j < bubbles.length; j++) {
+      const a = bubbles[i], b = bubbles[j];
+      const dx = (a.x + R) - (b.x + R);
+      const dy = (a.y + R) - (b.y + R);
+      const dist = Math.hypot(dx, dy);
+      if (dist < SIZE && dist > 0) {
+        const nx = dx / dist, ny = dy / dist;
+        const overlap = (SIZE - dist) / 2;
+        a.x += nx * overlap;
+        a.y += ny * overlap;
+        b.x -= nx * overlap;
+        b.y -= ny * overlap;
+      }
+    }
+}
+
 function animate() {
+  resolveCollisions();
+
   bubbles.forEach(b => {
     if (b !== active) {
       b.vy += gravity * 0.02;
       b.x += b.vx;
       b.y += b.vy;
-      if (b.x <= 0 || b.x >= container.clientWidth - SIZE) b.vx *= -1;
-      if (b.y > container.clientHeight - SIZE) {
-        b.y = container.clientHeight - SIZE;
-        b.vy *= -0.4;
-      }
     }
+
+    b.x = Math.max(0, Math.min(container.clientWidth - SIZE, b.x));
+    b.y = Math.max(0, Math.min(container.clientHeight - SIZE, b.y));
+
     b.style.left = b.x + "px";
     b.style.top = b.y + "px";
   });
+
   smalls.forEach(s => {
     s.x += s.vx;
     s.y += s.vy;
     s.style.left = s.x + "px";
     s.style.top = s.y + "px";
   });
+
   requestAnimationFrame(animate);
 }
 animate();
